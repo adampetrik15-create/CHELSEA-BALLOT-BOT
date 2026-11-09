@@ -1,0 +1,3 @@
+# Sem môžeš ručne pridať adresy článkov Chelsea s ticket application window, ak ich bot nenájde sám.
+# Jedna adresa na riadok, riadky začínajúce # sa ignorujú.
+# https://www.chelseafc.com/en/news/article/premier-league-ticket-news-XXXX-at-home-2026-27

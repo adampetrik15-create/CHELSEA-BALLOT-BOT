@@ -1,0 +1,64 @@
+name: Chelsea ballot bot
+
+on:
+  schedule:
+    - cron: "23 */2 * * *"   # zaloha; hlavne spustanie robi externy plánovac (cron-job.org)
+  workflow_dispatch:
+    inputs:
+      test_message:
+        description: "Posli len skusobnu spravu na vsetky webhooky (true/false)"
+        default: "false"
+      resend_last:
+        description: "Znova posli najnovsi tweet (ukazka vzhladu)"
+        default: "false"
+      force_x_api:
+        description: "Ignoruj since_id a znova nacitaj tweety z X API (true/false)"
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: chelsea-ballot-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Nainstaluj prehliadac (oficialny web Chelsea potrebuje JavaScript)
+        if: ${{ inputs.test_message != 'true' }}
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Spusti bota
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          ALL_SECRETS: ${{ toJSON(secrets) }}   # aby islo pridat webhook s lubovolnym nazvom DISCORD_WEBHOOK_URL_...
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          AVATAR_URL: ${{ secrets.AVATAR_URL }}
+          RSS_FEED_URL: ${{ secrets.RSS_FEED_URL }}
+          FORCE_X_API: ${{ inputs.force_x_api }}
+          RESEND_LAST: ${{ inputs.resend_last }}
+          TEST_MESSAGE: ${{ inputs.test_message }}
+        run: python chelsea_bot.py
+
+      - name: Uloz stav
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain state.json last_run.txt)" ]; then
+            git config user.name "ballot-bot"
+            git config user.email "ballot-bot@users.noreply.github.com"
+            git add state.json last_run.txt
+            git commit -m "update state"
+            git pull --rebase -q || true
+            git push
+          fi

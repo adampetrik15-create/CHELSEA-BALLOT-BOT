@@ -3,8 +3,12 @@ name: Chelsea ballot bot
 on:
   schedule:
     - cron: "23 */2 * * *"   # zaloha; hlavne spustanie robi externy plánovac (cron-job.org)
+    - cron: "5 6,7 * * *"     # daily radar okolo 08:00 slovenskeho casu (leto aj zima)
   workflow_dispatch:
     inputs:
+      send_radar:
+        description: "Posli daily radar hned (true/false)"
+        default: "false"
       test_message:
         description: "Posli len skusobnu spravu na vsetky webhooky (true/false)"
         default: "false"
@@ -49,6 +53,10 @@ jobs:
           FORCE_X_API: ${{ inputs.force_x_api }}
           RESEND_LAST: ${{ inputs.resend_last }}
           TEST_MESSAGE: ${{ inputs.test_message }}
+          SEND_RADAR: ${{ inputs.send_radar }}
+          DAILY_RADAR: ${{ vars.DAILY_RADAR }}
+          RADAR_HOUR: ${{ vars.RADAR_HOUR }}
+          GAP_ALERT_MINUTES: ${{ vars.GAP_ALERT_MINUTES }}
         run: python chelsea_bot.py
 
       - name: Uloz stav

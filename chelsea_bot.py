@@ -38,6 +38,17 @@ X_API_QUERY = f'from:{X_USER} (ballot OR "application window") -is:retweet'
 X_KEYWORD = re.compile(r"ballot|application\s+window", re.I)
 X_MAX_AGE_DAYS = 4
 X_SINCE = {}
+X_SINCE_MAX_AGE = dt.timedelta(days=6)   # recent search siaha 7 dni dozadu; starsie since_id nepouzivat
+GAP_ALERT_DEFAULT = 180                  # minuty bez behu, po ktorych poslat upozornenie (max raz za 24 h)
+RADAR_HOUR_DEFAULT = 8                   # daily radar: prvy beh od tejto hodiny (slovensky cas)
+try:
+    LOCAL = ZoneInfo("Europe/Bratislava")
+except Exception:
+    LOCAL = dt.timezone.utc
+FIXTURE_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/{}/teams/363/schedule?fixture=true"
+FIXTURE_LEAGUES = {"eng.1": "Premier League", "eng.fa": "FA Cup", "eng.league_cup": "Carabao Cup",
+                   "uefa.champions": "Champions League", "uefa.europa": "Europa League",
+                   "uefa.europa.conf": "Conference League"}
 SITE_PAGES = ["https://www.chelseafc.com/en/tickets", "https://www.chelseafc.com/en/news"]
 ARTICLE_RE = re.compile(r'(/en/news/article/[a-z0-9\-]*(?:ticket-news|application-window)[a-z0-9\-]*)', re.I)
 MAX_ARTICLES = 25
@@ -431,9 +442,26 @@ def parse_date(s):
             return None
 
 
+def env_int(name, default):
+    try:
+        return int(os.environ.get(name, "").strip())
+    except ValueError:
+        return default
+
+
+def since_id_usable(since_id, now=None):
+    """Cas vzniku tweetu je zakodovany v jeho ID (snowflake)."""
+    try:
+        ms = (int(since_id) >> 22) + 1288834974657
+        created = dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return False
+    return (now or dt.datetime.now(dt.timezone.utc)) - created < X_SINCE_MAX_AGE
+
+
 def fetch_x_api(token, since_id=None, opener=None):
     params = {"query": X_API_QUERY, "max_results": "10", "tweet.fields": "created_at"}
-    if since_id:
+    if since_id and since_id_usable(since_id):
         params["since_id"] = since_id
     else:
         params["start_time"] = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=X_MAX_AGE_DAYS)
@@ -483,6 +511,70 @@ def tweet_payload(t, now=None):
     if not p["opens"] and created:
         p["opens"] = created
     return p, window_embed(p, now=now)
+
+
+# ---------- daily radar ----------
+def next_match(fetch_fn=None, now=None):
+    """Najblizsi zapas zo vsetkych sutazi (neoficialne ESPN API). Vrati None, ak sa nic nenacita."""
+    fetch_fn = fetch_fn or fetch
+    now = now or dt.datetime.now(dt.timezone.utc)
+    found = []
+    for code, name in FIXTURE_LEAGUES.items():
+        try:
+            for ev in json.loads(fetch_fn(FIXTURE_URL.format(code))).get("events", []) or []:
+                when = dt.datetime.fromisoformat(ev["date"].replace("Z", "+00:00"))
+                if when < now - dt.timedelta(hours=2):
+                    continue
+                comp = ev["competitions"][0]
+                teams = {c["homeAway"]: c["team"]["displayName"] for c in comp["competitors"]}
+                found.append({"when": when, "home": teams["home"], "away": teams["away"], "league": name,
+                              "venue": (comp.get("venue") or {}).get("fullName")})
+        except Exception as e:
+            DIAG.append(f"[zapasy] {code} CHYBA: {type(e).__name__} {e}")
+    return min(found, key=lambda m: m["when"]) if found else None
+
+
+def radar_due(state, now):
+    if os.environ.get("SEND_RADAR", "").strip().lower() == "true":
+        return True
+    if os.environ.get("DAILY_RADAR", "").strip().lower() == "false":
+        return False
+    local = now.astimezone(LOCAL)
+    return (local.hour >= env_int("RADAR_HOUR", RADAR_HOUR_DEFAULT)
+            and state.get("radar_date") != local.date().isoformat())
+
+
+def radar_embed(match, pages, now):
+    if match:
+        venue = f"\n{match['venue']}" if match.get("venue") else ""
+        text = (f"**{match['home']} vs {match['away']}**\n{match['league']}\n"
+                f"{_ts(match['when'])} · {_ts(match['when'], 'R')}{venue}")
+    else:
+        text = "Zápas sa nepodarilo načítať."
+    fields = [{"name": "⚽ NAJBLIŽŠÍ ZÁPAS", "value": text[:1000], "inline": False}]
+    windows = {}
+    for pg in pages:
+        p = pg["parsed"]
+        if (p["opens"] or p["closes"]) and not (p["closes"] and now >= p["closes"]):
+            windows.setdefault(match_key(p), pg)
+    far = dt.datetime.max.replace(tzinfo=dt.timezone.utc)
+    for pg in sorted(windows.values(), key=lambda x: x["parsed"]["closes"] or far)[:5]:
+        p = pg["parsed"]
+        lines = [status_of(p["opens"], p["closes"], now)]
+        if p["opens"] and now < p["opens"]:
+            lines.append(f"Otvára: {_ts(p['opens'])} · {_ts(p['opens'], 'R')}")
+        if p["closes"]:
+            lines.append(f"Zatvára: {_ts(p['closes'])} · {_ts(p['closes'], 'R')}")
+        lines.append(f"[Článok]({pg['url']})")
+        fields.append({"name": f"🎟️ Chelsea vs {p.get('opponent') or '?'}",
+                       "value": "\n".join(lines)[:1000], "inline": False})
+    if not windows:
+        fields.append({"name": "🎟️ TICKET APPLICATION WINDOWS", "inline": False,
+                       "value": "Bot nenašiel otvorené ani pripravované okno (web sa mohol aj nepodariť "
+                                "prečítať). Over: https://www.chelseafc.com/en/tickets"})
+    local = now.astimezone(LOCAL)
+    return {"title": "📡 CHELSEA DAILY RADAR", "description": f"{local.day}. {local.month}. {local.year}",
+            "color": COLOR, "fields": fields}
 
 
 # ---------- hlavny beh ----------
@@ -552,12 +644,16 @@ def main():
             continue
         to_send.append(("x:" + t["id"], match_key(p) if p["closes"] else None, emb))
 
-    DIAG.append(f"clankov s oknom: {len(pages)}, novych tweetov: {len(x_new)}, na odoslanie: {len(to_send)}")
+    radar = radar_embed(next_match(now=now), pages, now) if radar_due(state, now) else None
+    DIAG.append(f"clankov s oknom: {len(pages)}, novych tweetov: {len(x_new)}, na odoslanie: {len(to_send)}, "
+                f"daily radar: {'ano' if radar else 'nie'}")
     for line in DIAG:
         print(line)
     if dry:
         for k, _, e in to_send:
             print("-", k, json.dumps(e, ensure_ascii=False)[:400])
+        if radar:
+            print("- radar", json.dumps(radar, ensure_ascii=False))
         return
     with open(LAST_RUN, "w", encoding="utf-8") as fh:
         fh.write("\n".join(DIAG) + "\n")
@@ -568,7 +664,12 @@ def main():
             gap = int((now - last).total_seconds() // 60)
         except ValueError:
             gap = 0
-        if gap > 75:
+        try:
+            alerted = now - dt.datetime.fromisoformat(state.get("last_gap_alert", "")) < dt.timedelta(hours=24)
+        except ValueError:
+            alerted = False
+        if gap > env_int("GAP_ALERT_MINUTES", GAP_ALERT_DEFAULT) and not alerted:
+            state["last_gap_alert"] = now.isoformat(timespec="seconds")
             post_discord(webhook, {"username": BOT_NAME, "content":
                                    f"⚠️ Ballot bot sa naposledy spustil pred {gap} min (oneskorenie spúšťača). "
                                    f"Nové ballot-y mohli prísť s oneskorením."})
@@ -587,6 +688,10 @@ def main():
             sent_matches.add(mkey)
         state["seen"] = sorted(seen)
         state["sent_matches"] = sorted(sent_matches)
+        save_state(state)
+    if radar:
+        send(webhook, radar)
+        state["radar_date"] = now.astimezone(LOCAL).date().isoformat()
         save_state(state)
 
 

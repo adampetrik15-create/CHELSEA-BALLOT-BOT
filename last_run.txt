@@ -1,4 +1,2 @@
-[web] https://www.chelseafc.com/en/tickets CHYBA: OSError HTTP 404
-[web] https://www.chelseafc.com/en/news: 116750 znakov, clankov s ticket info: 0
-[X] nie je nastaveny ani X_BEARER_TOKEN ani RSS_FEED_URL - tweety sa necitaju
-clankov s oknom: 0, novych tweetov: 0, na odoslanie: 0, daily radar: ano
+Testovacia sprava: webhookov 1, uspesne odoslana na 1
+

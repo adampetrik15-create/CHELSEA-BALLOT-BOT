@@ -596,7 +596,7 @@ def main():
 
     if "--test" in args or os.environ.get("TEST_MESSAGE", "").strip().lower() == "true":
         ok = post_discord(webhook, {"username": BOT_NAME,
-                                    "content": "✅ Chelsea ballot bot funguje. Budem posielat upozornenia na otvorene ticket application window-y Chelsea."})
+                                    "content": '📣 **CHELSEA – posledné ticket application window**\n🎟️ Chelsea vs Newcastle United (ne 3. 1. 2027 o 15:00, Stamford Bridge)\nOkno: po 23. 11. 13:00 – št 26. 11. 13:00 · 🔴 ZATVORENÉ\nVýsledok príde e-mailom do 4 pracovných dní.\n\n⚽ **Najbližší zápas**\nNottingham Forest vs Chelsea (Premier League, City Ground)\n📅 piatok 27. 11. 2026 o 21:00\n\n_Časy sú slovenské._'})
         msg = f"Testovacia sprava: webhookov {len(webhook)}, uspesne odoslana na {ok}"
         print(msg)
         with open(LAST_RUN, "w", encoding="utf-8") as fh:

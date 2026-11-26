@@ -31,7 +31,10 @@ EXTRA_FILE = os.path.join(HERE, "urls.txt")
 DIAG = []
 
 CLUB = "Chelsea FC"
-COLOR = 0x034694
+COLOR = 0x034694                         # modra: ticket okna
+GOLD = 0xDBA111                          # zlata: zapas
+HOME_URL = "https://www.chelseafc.com/"
+FOOTER = "Chelsea Ballot Bot • časy sa zobrazujú vo vašom časovom pásme"
 BOT_NAME = "Chelsea Ballot Bot"
 X_USER = "OK_Chelsea_1905"
 X_API_QUERY = f'from:{X_USER} (ballot OR "application window") -is:retweet'
@@ -49,8 +52,12 @@ FIXTURE_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/{}/teams/363
 FIXTURE_LEAGUES = {"eng.1": "Premier League", "eng.fa": "FA Cup", "eng.league_cup": "Carabao Cup",
                    "uefa.champions": "Champions League", "uefa.europa": "Europa League",
                    "uefa.europa.conf": "Conference League"}
-SITE_PAGES = ["https://www.chelseafc.com/en/tickets", "https://www.chelseafc.com/en/news"]
-ARTICLE_RE = re.compile(r'(/en/news/article/[a-z0-9\-]*(?:ticket-news|application-window)[a-z0-9\-]*)', re.I)
+SITE_PAGES = ["https://www.chelseafc.com/en/all-on-sale-dates-men--",
+              "https://www.chelseafc.com/en/tickets/mens-tickets",
+              "https://www.chelseafc.com/en/ticket-information-for-all-games",
+              "https://www.chelseafc.com/en/news/latest-news/all/all/news-type_Tickets",
+              "https://www.chelseafc.com/en/news"]
+ARTICLE_RE = re.compile(r'(/en/news/article/[a-z0-9\-]*(?:ticket-news|ticket-sales|application-window)[a-z0-9\-]*)', re.I)
 MAX_ARTICLES = 25
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -181,44 +188,84 @@ def parse_window(text, ref=None):
 def status_of(opens, closes, now=None):
     now = now or dt.datetime.now(dt.timezone.utc)
     if closes and now >= closes:
-        return "🔴 CLOSED"
+        return "🔴 ZATVORENÉ"
     if opens and now < opens:
-        return "🟡 PENDING"
+        return "🟡 ČOSKORO"
     if opens or closes:
-        return "🟢 OPEN"
-    return "⚪ UNKNOWN"
+        return "🟢 OTVORENÉ"
+    return "⚪ NEZNÁME"
 
 
 def _ts(d, style="f"):
     return f"<t:{int(d.timestamp())}:{style}>"
 
 
-def window_embed(p, match=None, now=None, extra=None):
+def field(name, value, inline=False):
+    return {"name": name, "value": value[:1024], "inline": inline}
+
+
+def card(author, title, description="", fields=(), color=COLOR):
+    out = {"author": {"name": author}, "title": title[:256], "color": color, "fields": list(fields)}
+    if description:
+        out["description"] = description[:4000]
+    return out
+
+
+def finish(cards, article=None):
+    """Odkaz na web a pata. url ma len prva karta: Discord zlucuje karty s rovnakou url."""
+    cards[0]["url"] = HOME_URL
+    link = f"**[Otvoriť chelseafc.com]({HOME_URL})**"
+    if article:
+        link += f" · [Článok o lístkoch]({article})"
+    cards[-1]["fields"].append(field("🔗 Oficiálny web", link))
+    cards[-1]["footer"] = {"text": FOOTER}
+    return cards
+
+
+def match_date_text(p):
+    d = p["match_date"]
+    t = to_time(re.sub(r"\s+", "", p["kickoff"])) if p.get("kickoff") else None
+    if t and UK:
+        return _ts(dt.datetime(d.year, d.month, d.day, t[0], t[1], tzinfo=UK), "F")
+    return f"{d.day}. {d.month}. {d.year}"
+
+
+def window_card(p, match=None, now=None, extra=None):
     opp = p.get("opponent")
-    match = match or (f"Chelsea vs {opp}" if opp else "Chelsea ticket application window")
-    fields = [{"name": "MATCH", "value": match, "inline": False},
-              {"name": "OPEN", "value": _ts(p["opens"]) if p["opens"] else "Not confirmed", "inline": True},
-              {"name": "CLOSE", "value": (_ts(p["closes"]) + "\n" + _ts(p["closes"], "R")) if p["closes"]
-               else "Not confirmed", "inline": True},
-              {"name": "STATUS", "value": status_of(p["opens"], p["closes"], now), "inline": True}]
+    match = match or (f"Chelsea  vs  {opp}" if opp else "Chelsea ticket application window")
+    fields = []
     if p.get("match_date"):
-        d = p["match_date"]
-        fields.append({"name": "MATCH DATE", "value": f"{d.day} {d:%b %Y}" + (f" · {p['kickoff']}" if p.get("kickoff") else ""),
-                       "inline": True})
+        fields.append(field("📅 Zápas", match_date_text(p)))
+    fields.append(field("🔓 Otvorenie", _ts(p["opens"]) if p["opens"] else "Nepotvrdené", True))
+    fields.append(field("🔒 Zatvorenie", _ts(p["closes"]) if p["closes"] else "Nepotvrdené", True))
+    now = now or dt.datetime.now(dt.timezone.utc)
+    if p["opens"] and now < p["opens"]:
+        fields.append(field("⏳ Otvára sa", _ts(p["opens"], "R"), True))
+    elif p["closes"] and now < p["closes"]:
+        fields.append(field("⏳ Zatvára sa", _ts(p["closes"], "R"), True))
     if p.get("category"):
-        fields.append({"name": "TICKETS", "value": p["category"], "inline": True})
+        fields.append(field("🎫 Kategória", p["category"], True))
     rules = []
     if p.get("tiers"):
-        rules.append(f"Open to: {p['tiers']} members.")
+        rules.append(f"Pre členov: {p['tiers']}.")
     if p.get("points"):
-        rules.append(f"You need at least {p['points']} loyalty points to be successful.")
+        rules.append(f"Potrebné vernostné body: aspoň {p['points']}.")
     if p.get("max_tickets"):
-        rules.append(f"Max {p['max_tickets']} tickets per application.")
+        rules.append(f"Max. lístkov na žiadosť: {p['max_tickets']}.")
     if rules:
-        fields.append({"name": "⚠️ ELIGIBILITY", "value": " ".join(rules)[:900], "inline": False})
+        fields.append(field("⚠️ Podmienky", "\n".join(rules)))
     if extra:
-        fields.append({"name": "DETAILS", "value": extra[:900], "inline": False})
-    return {"title": "🎟️ PL BALLOT RADAR", "description": f"**{CLUB.upper()}**", "color": COLOR, "fields": fields}
+        fields.append(field("ℹ️ Detaily", extra))
+    return card("CHELSEA BALLOT RADAR", f"🎟️  {match}",
+                f"Ticket application window\n**{status_of(p['opens'], p['closes'], now)}**", fields)
+
+
+def window_embed(p, match=None, now=None, extra=None, article=None):
+    return finish([window_card(p, match, now, extra)], article)[0]
+
+
+def notice(title, text):
+    return finish([card("CHELSEA BALLOT BOT", title, text)])[0]
 
 
 # ---------- siet ----------
@@ -506,8 +553,7 @@ def tweet_payload(t, now=None):
     created = parse_date(t.get("created", ""))
     p = parse_window(t["text"], created.date() if created else dt.date.today())
     if not p["opens"] and not p["closes"]:
-        return p, {"title": "🎟️ PL BALLOT RADAR", "description": f"**{CLUB.upper()}**\n" + t["text"][:3500],
-                   "color": COLOR}
+        return p, finish([card("CHELSEA BALLOT RADAR", "📰  Novinka o lístkoch", t["text"][:3500])])[0]
     if not p["opens"] and created:
         p["opens"] = created
     return p, window_embed(p, now=now)
@@ -544,14 +590,18 @@ def radar_due(state, now):
             and state.get("radar_date") != local.date().isoformat())
 
 
-def radar_embed(match, pages, now):
+def radar_embeds(match, pages, now):
+    local = now.astimezone(LOCAL)
+    day = f"{local.day}. {local.month}. {local.year}"
     if match:
-        venue = f"\n{match['venue']}" if match.get("venue") else ""
-        text = (f"**{match['home']} vs {match['away']}**\n{match['league']}\n"
-                f"{_ts(match['when'])} · {_ts(match['when'], 'R')}{venue}")
+        fields = [field("📅 Výkop", _ts(match["when"], "F")), field("🏆 Súťaž", match["league"], True)]
+        if match.get("venue"):
+            fields.append(field("🏟️ Štadión", match["venue"], True))
+        cards = [card(f"CHELSEA DAILY RADAR • {day}", f"⚽  {match['home']}  vs  {match['away']}",
+                      f"## {_ts(match['when'], 'R')}", fields, GOLD)]
     else:
-        text = "Zápas sa nepodarilo načítať."
-    fields = [{"name": "⚽ NAJBLIŽŠÍ ZÁPAS", "value": text[:1000], "inline": False}]
+        cards = [card(f"CHELSEA DAILY RADAR • {day}", "⚽  Najbližší zápas", "Zápas sa nepodarilo načítať.",
+                      color=GOLD)]
     windows = {}
     for pg in pages:
         p = pg["parsed"]
@@ -559,22 +609,14 @@ def radar_embed(match, pages, now):
             windows.setdefault(match_key(p), pg)
     far = dt.datetime.max.replace(tzinfo=dt.timezone.utc)
     for pg in sorted(windows.values(), key=lambda x: x["parsed"]["closes"] or far)[:5]:
-        p = pg["parsed"]
-        lines = [status_of(p["opens"], p["closes"], now)]
-        if p["opens"] and now < p["opens"]:
-            lines.append(f"Otvára: {_ts(p['opens'])} · {_ts(p['opens'], 'R')}")
-        if p["closes"]:
-            lines.append(f"Zatvára: {_ts(p['closes'])} · {_ts(p['closes'], 'R')}")
-        lines.append(f"[Článok]({pg['url']})")
-        fields.append({"name": f"🎟️ Chelsea vs {p.get('opponent') or '?'}",
-                       "value": "\n".join(lines)[:1000], "inline": False})
+        c = window_card(pg["parsed"], now=now)
+        c["fields"].append(field("📄 Zdroj", f"[Článok o lístkoch]({pg['url']})"))
+        cards.append(c)
     if not windows:
-        fields.append({"name": "🎟️ TICKET APPLICATION WINDOWS", "inline": False,
-                       "value": "Bot nenašiel otvorené ani pripravované okno (web sa mohol aj nepodariť "
-                                "prečítať). Over: https://www.chelseafc.com/en/tickets"})
-    local = now.astimezone(LOCAL)
-    return {"title": "📡 CHELSEA DAILY RADAR", "description": f"{local.day}. {local.month}. {local.year}",
-            "color": COLOR, "fields": fields}
+        cards.append(card("CHELSEA BALLOT RADAR", "🎟️  Ticket application windows",
+                          "Bot nenašiel otvorené ani pripravované okno. Web sa mohol aj nepodariť prečítať, "
+                          "preto si to over na stránke klubu."))
+    return finish(cards)
 
 
 # ---------- hlavny beh ----------
@@ -583,20 +625,21 @@ def match_key(p):
     return f"m:{(p.get('opponent') or '?').lower()}:{c.date().isoformat() if c else '?'}"
 
 
-def send(webhook, embed):
-    post_discord(webhook, {"username": BOT_NAME, "embeds": [embed]})
+def send(webhook, embeds):
+    post_discord(webhook, {"username": BOT_NAME,
+                           "embeds": embeds if isinstance(embeds, list) else [embeds]})
 
 
 def main():
     args = sys.argv[1:]
     webhook = get_webhooks()
-    dry = "--dry-run" in args
+    dry = "--dry-run" in args or os.environ.get("DRY_RUN", "").strip().lower() == "true"
     if not dry and not webhook:
         sys.exit("Chyba: nastav DISCORD_WEBHOOK_URL (premenna prostredia alebo GitHub secret).")
 
     if "--test" in args or os.environ.get("TEST_MESSAGE", "").strip().lower() == "true":
-        ok = post_discord(webhook, {"username": BOT_NAME,
-                                    "content": "✅ Chelsea ballot bot funguje. Budem posielat upozornenia na otvorene ticket application window-y Chelsea."})
+        ok = post_discord(webhook, {"username": BOT_NAME, "embeds": [notice(
+            "✅  Bot funguje", "Budem posielať upozornenia na ticket application window-y Chelsea.")]})
         msg = f"Testovacia sprava: webhookov {len(webhook)}, uspesne odoslana na {ok}"
         print(msg)
         with open(LAST_RUN, "w", encoding="utf-8") as fh:
@@ -633,7 +676,7 @@ def main():
             continue
         if not p["opens"] and not p["closes"]:
             continue
-        to_send.append((key, match_key(p), window_embed(p, now=now)))
+        to_send.append((key, match_key(p), window_embed(p, now=now, article=pg["url"])))
     for t in x_new:
         p, emb = tweet_payload(t, now)
         if p["closes"] and now >= p["closes"]:
@@ -644,14 +687,14 @@ def main():
             continue
         to_send.append(("x:" + t["id"], match_key(p) if p["closes"] else None, emb))
 
-    radar = radar_embed(next_match(now=now), pages, now) if radar_due(state, now) else None
+    radar = radar_embeds(next_match(now=now), pages, now) if radar_due(state, now) else None
     DIAG.append(f"clankov s oknom: {len(pages)}, novych tweetov: {len(x_new)}, na odoslanie: {len(to_send)}, "
                 f"daily radar: {'ano' if radar else 'nie'}")
     for line in DIAG:
         print(line)
     if dry:
         for k, _, e in to_send:
-            print("-", k, json.dumps(e, ensure_ascii=False)[:400])
+            print("-", k, json.dumps(e, ensure_ascii=False))
         if radar:
             print("- radar", json.dumps(radar, ensure_ascii=False))
         return
@@ -670,13 +713,12 @@ def main():
             alerted = False
         if gap > env_int("GAP_ALERT_MINUTES", GAP_ALERT_DEFAULT) and not alerted:
             state["last_gap_alert"] = now.isoformat(timespec="seconds")
-            post_discord(webhook, {"username": BOT_NAME, "content":
-                                   f"⚠️ Ballot bot sa naposledy spustil pred {gap} min (oneskorenie spúšťača). "
-                                   f"Nové ballot-y mohli prísť s oneskorením."})
+            send(webhook, notice("⚠️  Oneskorenie spúšťača",
+                                 f"Bot sa naposledy spustil pred {gap} min. "
+                                 f"Nové okná mohli prísť s oneskorením."))
     else:
-        post_discord(webhook, {"username": BOT_NAME,
-                               "content": f"✅ Chelsea ballot bot beží. Pri prvom prechode posielam {len(to_send)} "
-                                          f"aktuálnych okien, ďalej len nové."})
+        send(webhook, notice("✅  Bot beží", f"Pri prvom prechode posielam aktuálne okná ({len(to_send)}), "
+                                            f"ďalej len nové."))
     state["last_run"] = now.isoformat(timespec="seconds")
     state["seen"] = sorted(seen)
     state["sent_matches"] = sorted(sent_matches)

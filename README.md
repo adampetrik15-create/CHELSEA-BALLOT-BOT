@@ -19,6 +19,7 @@ Voliteľné premenné (Settings → Secrets and variables → Actions → Variab
 - `GAP_ALERT_MINUTES` – po koľkých minútach bez behu poslať upozornenie (predvolene 180, najviac raz za 24 h)
 
 Okamžité odoslanie: Run workflow s `send_radar = true`.
+Skúška bez odoslania: `dry_run = true` (výsledok je v logu behu).
 
 ## Spúšťanie
 Actions → „Chelsea ballot bot" → Run workflow (`test_message = true` pošle skúšobnú správu). Pravidelne ho spúšťa cron-job.org (POST na `.../actions/workflows/ballots.yml/dispatches`, body `{"ref":"main"}`).

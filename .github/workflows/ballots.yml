@@ -6,6 +6,9 @@ on:
     - cron: "5 6,7 * * *"     # daily radar okolo 08:00 slovenskeho casu (leto aj zima)
   workflow_dispatch:
     inputs:
+      dry_run:
+        description: "Skuska: nic neposle, iba vypise co nasiel (true/false)"
+        default: "false"
       send_radar:
         description: "Posli daily radar hned (true/false)"
         default: "false"
@@ -54,6 +57,7 @@ jobs:
           RESEND_LAST: ${{ inputs.resend_last }}
           TEST_MESSAGE: ${{ inputs.test_message }}
           SEND_RADAR: ${{ inputs.send_radar }}
+          DRY_RUN: ${{ inputs.dry_run }}
           DAILY_RADAR: ${{ vars.DAILY_RADAR }}
           RADAR_HOUR: ${{ vars.RADAR_HOUR }}
           GAP_ALERT_MINUTES: ${{ vars.GAP_ALERT_MINUTES }}

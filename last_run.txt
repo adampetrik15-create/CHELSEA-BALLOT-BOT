@@ -1,7 +1,7 @@
-[web] https://www.chelseafc.com/en/all-on-sale-dates-men--: 112699 znakov, clankov s ticket info: 0
-[web] https://www.chelseafc.com/en/tickets/mens-tickets: 134120 znakov, clankov s ticket info: 0
-[web] https://www.chelseafc.com/en/ticket-information-for-all-games: 114912 znakov, clankov s ticket info: 0
-[web] https://www.chelseafc.com/en/news/latest-news/all/all/news-type_Tickets: 104386 znakov, clankov s ticket info: 0
-[web] https://www.chelseafc.com/en/news: 118300 znakov, clankov s ticket info: 0
+[web] https://www.chelseafc.com/en/all-on-sale-dates-men--: 114012 znakov, clankov s ticket info: 0
+[web] https://www.chelseafc.com/en/tickets/mens-tickets: 135299 znakov, clankov s ticket info: 0
+[web] https://www.chelseafc.com/en/ticket-information-for-all-games: 116225 znakov, clankov s ticket info: 0
+[web] https://www.chelseafc.com/en/news/latest-news/all/all/news-type_Tickets: 105634 znakov, clankov s ticket info: 0
+[web] https://www.chelseafc.com/en/news: 120530 znakov, clankov s ticket info: 0
 [X] nie je nastaveny ani X_BEARER_TOKEN ani RSS_FEED_URL - tweety sa necitaju
-clankov s oknom: 0, novych tweetov: 0, na odoslanie: 0, daily radar: nie
+clankov s oknom: 0, novych tweetov: 0, na odoslanie: 0, daily radar: ano
